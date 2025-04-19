@@ -67,6 +67,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 
 	"github.com/bits-and-blooms/bitset"
 )
@@ -75,9 +76,10 @@ import (
 // requirement is to make membership queries; _i.e._, whether an item is a
 // member of a set.
 type BloomFilter struct {
-	m uint
-	k uint
-	b *bitset.BitSet
+	m  uint
+	k  uint
+	b  *bitset.BitSet
+	lk sync.RWMutex `json:"-"`
 }
 
 func max(x, y uint) uint {
@@ -90,7 +92,7 @@ func max(x, y uint) uint {
 // New creates a new Bloom filter with _m_ bits and _k_ hashing functions
 // We force _m_ and _k_ to be at least one to avoid panics.
 func New(m uint, k uint) *BloomFilter {
-	return &BloomFilter{max(1, m), max(1, k), bitset.New(m)}
+	return &BloomFilter{max(1, m), max(1, k), bitset.New(m), sync.RWMutex{}}
 }
 
 // From creates a new Bloom filter with len(_data_) * 64 bits and _k_ hashing
@@ -103,7 +105,7 @@ func From(data []uint64, k uint) *BloomFilter {
 // FromWithM creates a new Bloom filter with _m_ length, _k_ hashing functions.
 // The data slice is not going to be reset.
 func FromWithM(data []uint64, m, k uint) *BloomFilter {
-	return &BloomFilter{m, k, bitset.From(data)}
+	return &BloomFilter{m, k, bitset.From(data), sync.RWMutex{}}
 }
 
 // baseHashes returns the four hash values of data that are used to create k
@@ -161,6 +163,10 @@ func (f *BloomFilter) BitSet() *bitset.BitSet {
 // Add data to the Bloom Filter. Returns the filter (allows chaining)
 func (f *BloomFilter) Add(data []byte) *BloomFilter {
 	h := baseHashes(data)
+
+	// Lock the filter after calculating the hashes
+	f.lk.Lock()
+	defer f.lk.Unlock()
 	for i := uint(0); i < f.k; i++ {
 		f.b.Set(f.location(h, i))
 	}
@@ -178,6 +184,10 @@ func (f *BloomFilter) Merge(g *BloomFilter) error {
 		return fmt.Errorf("k's don't match: %d != %d", f.m, g.m)
 	}
 
+	f.lk.Lock()
+	defer f.lk.Unlock()
+	g.lk.Lock()
+	defer g.lk.Unlock()
 	f.b.InPlaceUnion(g.b)
 	return nil
 }
@@ -199,6 +209,10 @@ func (f *BloomFilter) AddString(data string) *BloomFilter {
 // is definitely not in the set.
 func (f *BloomFilter) Test(data []byte) bool {
 	h := baseHashes(data)
+
+	// Lock the filter after calculating the hashes
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	for i := uint(0); i < f.k; i++ {
 		if !f.b.Test(f.location(h, i)) {
 			return false
@@ -217,6 +231,8 @@ func (f *BloomFilter) TestString(data string) bool {
 // TestLocations returns true if all locations are set in the BloomFilter, false
 // otherwise.
 func (f *BloomFilter) TestLocations(locs []uint64) bool {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	for i := 0; i < len(locs); i++ {
 		if !f.b.Test(uint(locs[i] % uint64(f.m))) {
 			return false
@@ -232,6 +248,9 @@ func (f *BloomFilter) TestLocations(locs []uint64) bool {
 func (f *BloomFilter) TestAndAdd(data []byte) bool {
 	present := true
 	h := baseHashes(data)
+
+	f.lk.Lock()
+	defer f.lk.Unlock()
 	for i := uint(0); i < f.k; i++ {
 		l := f.location(h, i)
 		if !f.b.Test(l) {
@@ -256,6 +275,9 @@ func (f *BloomFilter) TestAndAddString(data string) bool {
 func (f *BloomFilter) TestOrAdd(data []byte) bool {
 	present := true
 	h := baseHashes(data)
+
+	f.lk.Lock()
+	defer f.lk.Unlock()
 	for i := uint(0); i < f.k; i++ {
 		l := f.location(h, i)
 		if !f.b.Test(l) {
@@ -275,6 +297,8 @@ func (f *BloomFilter) TestOrAddString(data string) bool {
 
 // ClearAll clears all the data in a Bloom filter, removing all keys
 func (f *BloomFilter) ClearAll() *BloomFilter {
+	f.lk.Lock()
+	defer f.lk.Unlock()
 	f.b.ClearAll()
 	return f
 }
@@ -311,6 +335,8 @@ func EstimateFalsePositiveRate(m, k, n uint) (fpRate float64) {
 // Approximating the number of items
 // https://en.wikipedia.org/wiki/Bloom_filter#Approximating_the_number_of_items_in_a_Bloom_filter
 func (f *BloomFilter) ApproximatedSize() uint32 {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	x := float64(f.b.Count())
 	m := float64(f.Cap())
 	k := float64(f.K())
@@ -327,6 +353,8 @@ type bloomFilterJSON struct {
 
 // MarshalJSON implements json.Marshaler interface.
 func (f BloomFilter) MarshalJSON() ([]byte, error) {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	return json.Marshal(bloomFilterJSON{f.m, f.k, f.b})
 }
 
@@ -353,6 +381,8 @@ func (f *BloomFilter) UnmarshalJSON(data []byte) error {
 //	      f, err := os.Create("myfile")
 //		       w := bufio.NewWriter(f)
 func (f *BloomFilter) WriteTo(stream io.Writer) (int64, error) {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	err := binary.Write(stream, binary.BigEndian, uint64(f.m))
 	if err != nil {
 		return 0, err
@@ -398,6 +428,8 @@ func (f *BloomFilter) ReadFrom(stream io.Reader) (int64, error) {
 
 // GobEncode implements gob.GobEncoder interface.
 func (f *BloomFilter) GobEncode() ([]byte, error) {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
 	var buf bytes.Buffer
 	_, err := f.WriteTo(&buf)
 	if err != nil {
@@ -417,6 +449,9 @@ func (f *BloomFilter) GobDecode(data []byte) error {
 
 // MarshalBinary implements binary.BinaryMarshaler interface.
 func (f *BloomFilter) MarshalBinary() ([]byte, error) {
+	f.lk.RLock()
+	defer f.lk.RUnlock()
+
 	var buf bytes.Buffer
 	_, err := f.WriteTo(&buf)
 	if err != nil {
