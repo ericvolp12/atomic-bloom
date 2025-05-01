@@ -1,4 +1,4 @@
-module github.com/ericvolp12/bloom
+module github.com/ericvolp12/atomic-bloom
 
 go 1.23.0
 
