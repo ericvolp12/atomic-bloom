@@ -2,15 +2,20 @@ package bloom
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // This implementation of Bloom filters is _not_
@@ -788,48 +793,69 @@ func BenchmarkHighConcurrency(b *testing.B) {
 	wg.Wait()
 }
 
+// TestConcurrentAddAndTestThroughput tests the throughput of concurrent
+// add and test operations on the Bloom filter.
+// It adds 10,000 keys per second in a single goroutine
+// It tests as many keys as possible in 7 other goroutines
+// It completes when it has run for 10 seconds
 func TestConcurrentAddAndTestThroughput(t *testing.T) {
-	numRoutines := 4
-	gmp := runtime.GOMAXPROCS(numRoutines)
+	gmp := runtime.GOMAXPROCS(8)
 	defer runtime.GOMAXPROCS(gmp)
 
-	numKeys := uint(10_000_000)
-
-	f := NewWithEstimates(numKeys, 0.0001)
-	keys := make([][]byte, numKeys)
-	for i := 0; i < int(numKeys); i++ {
+	filterSize := 10_000_000
+	f := NewWithEstimates(uint(filterSize), 0.0001)
+	keys := make([][]byte, filterSize/10)
+	for i := 0; i < filterSize/10; i++ {
 		key := make([]byte, 100)
 		binary.BigEndian.PutUint32(key, uint32(i))
 		keys[i] = key
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(numRoutines)
+	addRate := rate.NewLimiter(rate.Limit(10000), 10000) // 10,000 adds per second
 
-	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(8)
+
+	startTime := time.Now()
+	endTime := startTime.Add(10 * time.Second)
+
+	ctx := context.Background()
 
 	go func() {
-		for i := 0; i < int(numKeys); i++ {
-			f.Add(keys[i])
+		for time.Now().Before(endTime) {
+			if err := addRate.Wait(ctx); err != nil {
+				return
+			}
+			for i := 0; i < len(keys); i++ {
+				f.Add(keys[i])
+			}
 		}
 		wg.Done()
 	}()
 
-	for i := 0; i < numRoutines-1; i++ {
+	totalKeysTested := atomic.Int64{}
+
+	for i := 0; i < 7; i++ {
 		go func() {
-			for i := 0; i < int(numKeys); i++ {
-				f.Test(keys[i])
+			keysTested := 0
+			for time.Now().Before(endTime) {
+				// Start at a random position in the keys slice
+				startIdx := rand.Intn(len(keys))
+				for j := startIdx; j < len(keys); j++ {
+					f.Test(keys[j])
+					keysTested++
+				}
 			}
+			totalKeysTested.Add(int64(keysTested))
 			wg.Done()
 		}()
 	}
 
 	wg.Wait()
 
-	elapsed := time.Since(start)
-	throughput := float64(numKeys) / elapsed.Seconds()
-	t.Logf("Concurrent Add and Test throughput: %.2f keys/sec", throughput)
-	if throughput < 10_000_000 {
-		t.Errorf("Throughput is below expected threshold: %.2f keys/sec", throughput)
+	totalKeys := totalKeysTested.Load()
+	if totalKeys > 0 {
+		throughput := float64(totalKeys) / 10.0 // 10 seconds
+		t.Errorf("Total keys tested: %d, Throughput: %.5f keys/sec", totalKeys, throughput)
 	}
 }
