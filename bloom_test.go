@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 )
 
 // This implementation of Bloom filters is _not_
@@ -785,4 +786,50 @@ func BenchmarkHighConcurrency(b *testing.B) {
 	}
 
 	wg.Wait()
+}
+
+func TestConcurrentAddAndTestThroughput(t *testing.T) {
+	numRoutines := 4
+	gmp := runtime.GOMAXPROCS(numRoutines)
+	defer runtime.GOMAXPROCS(gmp)
+
+	numKeys := uint(10_000_000)
+
+	f := NewWithEstimates(numKeys, 0.0001)
+	keys := make([][]byte, numKeys)
+	for i := 0; i < int(numKeys); i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(numRoutines)
+
+	start := time.Now()
+
+	go func() {
+		for i := 0; i < int(numKeys); i++ {
+			f.Add(keys[i])
+		}
+		wg.Done()
+	}()
+
+	for i := 0; i < numRoutines-1; i++ {
+		go func() {
+			for i := 0; i < int(numKeys); i++ {
+				f.Test(keys[i])
+			}
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	elapsed := time.Since(start)
+	throughput := float64(numKeys) / elapsed.Seconds()
+	t.Logf("Concurrent Add and Test throughput: %.2f keys/sec", throughput)
+	if throughput < 10_000_000 {
+		t.Errorf("Throughput is below expected threshold: %.2f keys/sec", throughput)
+	}
 }
