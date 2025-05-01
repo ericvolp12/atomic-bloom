@@ -798,6 +798,8 @@ func BenchmarkHighConcurrency(b *testing.B) {
 // It adds 10,000 keys per second in a single goroutine
 // It tests as many keys as possible in 7 other goroutines
 // It completes when it has run for 10 seconds
+// On my machine:
+// Total keys tested: 139936012, Throughput: 13993601.20000 keys/sec (nearly 14m tests/sec)
 func TestConcurrentAddAndTestThroughput(t *testing.T) {
 	gmp := runtime.GOMAXPROCS(8)
 	defer runtime.GOMAXPROCS(gmp)
