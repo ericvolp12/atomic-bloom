@@ -2,16 +2,21 @@ package bloom
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bits-and-blooms/bitset"
+	"golang.org/x/time/rate"
 )
 
 // This implementation of Bloom filters is _not_
@@ -820,4 +825,73 @@ func BenchmarkHighConcurrency(b *testing.B) {
 	}
 
 	wg.Wait()
+}
+
+// TestConcurrentAddAndTestThroughput tests the throughput of concurrent
+// add and test operations on the Bloom filter.
+// It adds 10,000 keys per second in a single goroutine
+// It tests as many keys as possible in 7 other goroutines
+// It completes when it has run for 10 seconds
+// On my machine:
+// Total keys tested: 14357166, Throughput: 1435716.60000 keys/sec
+func TestConcurrentAddAndTestThroughput(t *testing.T) {
+	gmp := runtime.GOMAXPROCS(8)
+	defer runtime.GOMAXPROCS(gmp)
+
+	filterSize := 10_000_000
+	f := NewWithEstimates(uint(filterSize), 0.0001)
+	keys := make([][]byte, filterSize/10)
+	for i := 0; i < filterSize/10; i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+
+	addRate := rate.NewLimiter(rate.Limit(10000), 10000) // 10,000 adds per second
+
+	var wg sync.WaitGroup
+	wg.Add(8)
+
+	startTime := time.Now()
+	endTime := startTime.Add(10 * time.Second)
+
+	ctx := context.Background()
+
+	go func() {
+		for time.Now().Before(endTime) {
+			if err := addRate.Wait(ctx); err != nil {
+				return
+			}
+			for i := 0; i < len(keys); i++ {
+				f.Add(keys[i])
+			}
+		}
+		wg.Done()
+	}()
+
+	totalKeysTested := atomic.Int64{}
+
+	for i := 0; i < 7; i++ {
+		go func() {
+			keysTested := 0
+			for time.Now().Before(endTime) {
+				// Start at a random position in the keys slice
+				startIdx := rand.Intn(len(keys))
+				for j := startIdx; j < len(keys); j++ {
+					f.Test(keys[j])
+					keysTested++
+				}
+			}
+			totalKeysTested.Add(int64(keysTested))
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	totalKeys := totalKeysTested.Load()
+	if totalKeys > 0 {
+		throughput := float64(totalKeys) / 10.0 // 10 seconds
+		t.Errorf("Total keys tested: %d, Throughput: %.5f keys/sec", totalKeys, throughput)
+	}
 }
