@@ -46,12 +46,12 @@ For numerical data, we recommend that you look into the encoding/binary library.
     filter.Add(n1)
 ```
 
-Godoc documentation:  https://pkg.go.dev/github.com/ericvolp12/bloom
+Godoc documentation:  https://pkg.go.dev/github.com/ericvolp12/atomic-bloom
 
 ## Installation
 
 ```bash
-go get -u github.com/ericvolp12/bloom
+go get -u github.com/ericvolp12/atomic-bloom
 ```
 
 ## Running all tests
