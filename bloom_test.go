@@ -15,61 +15,58 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bits-and-blooms/bitset"
 	"golang.org/x/time/rate"
 )
 
-// This implementation of Bloom filters is _not_
-// safe for concurrent use. Uncomment the following
-// method and run go test -race
-//
-// func TestConcurrent(t *testing.T) {
-// 	gmp := runtime.GOMAXPROCS(2)
-// 	defer runtime.GOMAXPROCS(gmp)
-//
-// 	f := New(1000, 4)
-// 	n1 := []byte("Bess")
-// 	n2 := []byte("Jane")
-// 	f.Add(n1)
-// 	f.Add(n2)
-//
-// 	var wg sync.WaitGroup
-// 	const try = 1000
-// 	var err1, err2 error
-//
-// 	wg.Add(1)
-// 	go func() {
-// 		for i := 0; i < try; i++ {
-// 			n1b := f.Test(n1)
-// 			if !n1b {
-// 				err1 = fmt.Errorf("%v should be in", n1)
-// 				break
-// 			}
-// 		}
-// 		wg.Done()
-// 	}()
-//
-// 	wg.Add(1)
-// 	go func() {
-// 		for i := 0; i < try; i++ {
-// 			n2b := f.Test(n2)
-// 			if !n2b {
-// 				err2 = fmt.Errorf("%v should be in", n2)
-// 				break
-// 			}
-// 		}
-// 		wg.Done()
-// 	}()
-//
-// 	wg.Wait()
-//
-// 	if err1 != nil {
-// 		t.Fatal(err1)
-// 	}
-// 	if err2 != nil {
-// 		t.Fatal(err2)
-// 	}
-// }
+// This implementation of Bloom filters _is_
+// safe for concurrent use!!!
+func TestConcurrent(t *testing.T) {
+	gmp := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(gmp)
+
+	f := New(1000, 4)
+	n1 := []byte("Bess")
+	n2 := []byte("Jane")
+	f.Add(n1)
+	f.Add(n2)
+
+	var wg sync.WaitGroup
+	const try = 1000
+	var err1, err2 error
+
+	wg.Add(1)
+	go func() {
+		for i := 0; i < try; i++ {
+			n1b := f.Test(n1)
+			if !n1b {
+				err1 = fmt.Errorf("%v should be in", n1)
+				break
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	go func() {
+		for i := 0; i < try; i++ {
+			n2b := f.Test(n2)
+			if !n2b {
+				err2 = fmt.Errorf("%v should be in", n2)
+				break
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	if err1 != nil {
+		t.Fatal(err1)
+	}
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+}
 
 func TestBasic(t *testing.T) {
 	f := New(1000, 4)
@@ -323,7 +320,7 @@ func TestMarshalUnmarshalJSON(t *testing.T) {
 }
 
 func TestMarshalUnmarshalJSONValue(t *testing.T) {
-	f := BloomFilter{1000, 4, bitset.New(1000), sync.RWMutex{}}
+	f := BloomFilter{1000, 4, newAtomicBitSet(1000)}
 	data, err := json.Marshal(f)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -590,38 +587,6 @@ func TestCopy(t *testing.T) {
 	}
 }
 
-func TestFrom(t *testing.T) {
-	var (
-		k    = uint(5)
-		data = make([]uint64, 10)
-		test = []byte("test")
-	)
-
-	bf := From(data, k)
-	if bf.K() != k {
-		t.Errorf("Constant k does not match the expected value")
-	}
-
-	if bf.Cap() != uint(len(data)*64) {
-		t.Errorf("Capacity does not match the expected value")
-	}
-
-	if bf.Test(test) {
-		t.Errorf("Bloom filter should not contain the value")
-	}
-
-	bf.Add(test)
-	if !bf.Test(test) {
-		t.Errorf("Bloom filter should contain the value")
-	}
-
-	// create a new Bloom filter from an existing (populated) data slice.
-	bf = From(data, k)
-	if !bf.Test(test) {
-		t.Errorf("Bloom filter should contain the value")
-	}
-}
-
 func TestTestLocations(t *testing.T) {
 	f := NewWithEstimates(1000, 0.001)
 	n1 := []byte("Love")
@@ -833,7 +798,7 @@ func BenchmarkHighConcurrency(b *testing.B) {
 // It tests as many keys as possible in 7 other goroutines
 // It completes when it has run for 10 seconds
 // On my machine:
-// Total keys tested: 14357166, Throughput: 1435716.60000 keys/sec
+// Total keys tested: 139936012, Throughput: 13993601.20000 keys/sec (nearly 14m tests/sec)
 func TestConcurrentAddAndTestThroughput(t *testing.T) {
 	gmp := runtime.GOMAXPROCS(8)
 	defer runtime.GOMAXPROCS(gmp)
