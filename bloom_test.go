@@ -18,9 +18,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// This implementation of Bloom filters is _not_
-// safe for concurrent use. Uncomment the following
-// method and run go test -race
+// This implementation of Bloom filters _is_
+// safe for concurrent use!!!
 func TestConcurrent(t *testing.T) {
 	gmp := runtime.GOMAXPROCS(2)
 	defer runtime.GOMAXPROCS(gmp)
