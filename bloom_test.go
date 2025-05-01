@@ -682,3 +682,107 @@ func TestEncodeDecodeBinary(t *testing.T) {
 		t.Errorf("missing value 'one'")
 	}
 }
+
+func BenchmarkAdd(b *testing.B) {
+	f := NewWithEstimates(uint(b.N), 0.0001)
+
+	// Generate N random key values
+	keys := make([][]byte, b.N)
+	for i := 0; i < b.N; i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		f.Add(keys[i])
+	}
+}
+func BenchmarkTest(b *testing.B) {
+	f := NewWithEstimates(uint(b.N), 0.0001)
+
+	// Generate N random key values
+	keys := make([][]byte, b.N)
+	for i := 0; i < b.N; i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+
+	// Add keys to the filter
+	for i := 0; i < b.N; i++ {
+		f.Add(keys[i])
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		f.Test(keys[i])
+	}
+}
+
+func BenchmarkConcurrent(b *testing.B) {
+	gmp := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(gmp)
+
+	f := NewWithEstimates(uint(b.N), 0.0001)
+	keys := make([][]byte, b.N)
+	for i := 0; i < b.N; i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	b.ResetTimer()
+
+	go func() {
+		for i := 0; i < b.N; i++ {
+			f.Add(keys[i])
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		for i := 0; i < b.N; i++ {
+			f.Test(keys[i])
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+}
+
+func BenchmarkHighConcurrency(b *testing.B) {
+	gmp := runtime.GOMAXPROCS(32)
+	defer runtime.GOMAXPROCS(gmp)
+
+	f := NewWithEstimates(uint(b.N), 0.0001)
+	keys := make([][]byte, b.N)
+	for i := 0; i < b.N; i++ {
+		key := make([]byte, 100)
+		binary.BigEndian.PutUint32(key, uint32(i))
+		keys[i] = key
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(32)
+
+	b.ResetTimer()
+
+	for i := 0; i < 32; i++ {
+		go func(i int) {
+			for j := 0; j < b.N; j++ {
+				if i%2 == 0 {
+					f.Add(keys[j])
+				} else {
+					f.Test(keys[j])
+				}
+			}
+			wg.Done()
+		}(i)
+	}
+
+	wg.Wait()
+}
