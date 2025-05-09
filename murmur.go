@@ -50,14 +50,14 @@ const (
 	block_size = 16
 )
 
-// digest128 represents a partial evaluation of a 128 bites hash.
-type digest128 struct {
+// Digest128 represents a partial evaluation of a 128 bites hash.
+type Digest128 struct {
 	h1 uint64 // Unfinalized running hash part 1.
 	h2 uint64 // Unfinalized running hash part 2.
 }
 
 // bmix will hash blocks (16 bytes)
-func (d *digest128) bmix(p []byte) {
+func (d *Digest128) bmix(p []byte) {
 	nblocks := len(p) / block_size
 	for i := 0; i < nblocks; i++ {
 		b := (*[16]byte)(unsafe.Pointer(&p[i*block_size]))
@@ -67,7 +67,7 @@ func (d *digest128) bmix(p []byte) {
 }
 
 // bmix_words will hash two 64-bit words (16 bytes)
-func (d *digest128) bmix_words(k1, k2 uint64) {
+func (d *Digest128) bmix_words(k1, k2 uint64) {
 	h1, h2 := d.h1, d.h2
 
 	k1 *= c1_128
@@ -90,14 +90,14 @@ func (d *digest128) bmix_words(k1, k2 uint64) {
 	d.h1, d.h2 = h1, h2
 }
 
-// sum128 computers two 64-bit hash value. It is assumed that
+// Sum128 computers two 64-bit hash value. It is assumed that
 // bmix was first called on the data to process complete blocks
 // of 16 bytes. The 'tail' is a slice representing the 'tail' (leftover
 // elements, fewer than 16). If pad_tail is true, we make it seem like
 // there is an extra element with value 1 appended to the tail.
 // The length parameter represents the full length of the data (including
 // the blocks of 16 bytes, and, if pad_tail is true, an extra byte).
-func (d *digest128) sum128(pad_tail bool, length uint, tail []byte) (h1, h2 uint64) {
+func (d *Digest128) Sum128(pad_tail bool, length uint, tail []byte) (h1, h2 uint64) {
 	h1, h2 = d.h1, d.h2
 
 	var k1, k2 uint64
@@ -243,7 +243,7 @@ func fmix64(k uint64) uint64 {
 	return k
 }
 
-// sum256 will compute 4 64-bit hash values from the input.
+// Sum256 will compute 4 64-bit hash values from the input.
 // It is designed to never allocate memory on the heap. So it
 // works without any byte buffer whatsoever.
 // It is designed to be strictly equivalent to
@@ -256,7 +256,7 @@ func fmix64(k uint64) uint64 {
 //	         v3, v4 := hasher.Sum128()
 //
 // See TestHashRandom.
-func (d *digest128) sum256(data []byte) (hash1, hash2, hash3, hash4 uint64) {
+func (d *Digest128) Sum256(data []byte) (hash1, hash2, hash3, hash4 uint64) {
 	// We always start from zero.
 	d.h1, d.h2 = 0, 0
 	// Process as many bytes as possible.
@@ -265,7 +265,7 @@ func (d *digest128) sum256(data []byte) (hash1, hash2, hash3, hash4 uint64) {
 	length := uint(len(data))
 	tail_length := length % block_size
 	tail := data[length-tail_length:]
-	hash1, hash2 = d.sum128(false, length, tail)
+	hash1, hash2 = d.Sum128(false, length, tail)
 	// Next we want to 'virtually' append 1 to the input, but,
 	// we do not want to append to an actual array!!!
 	if tail_length+1 == block_size {
@@ -278,11 +278,11 @@ func (d *digest128) sum256(data []byte) (hash1, hash2, hash3, hash4 uint64) {
 		// We process the resulting 2 words.
 		d.bmix_words(word1, word2)
 		tail := data[length:] // empty slice, deliberate.
-		hash3, hash4 = d.sum128(false, length+1, tail)
+		hash3, hash4 = d.Sum128(false, length+1, tail)
 	} else {
 		// We still have a tail (fewer than 15 bytes) but we
 		// need to append '1' to it.
-		hash3, hash4 = d.sum128(true, length+1, tail)
+		hash3, hash4 = d.Sum128(true, length+1, tail)
 	}
 
 	return hash1, hash2, hash3, hash4

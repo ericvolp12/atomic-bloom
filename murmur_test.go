@@ -16,8 +16,8 @@ func TestHashBasic(t *testing.T) {
 	}
 	for length := 0; length <= 1000; length++ {
 		data := bigdata[:length]
-		var d digest128
-		h1, h2, h3, h4 := d.sum256(data)
+		var d Digest128
+		h1, h2, h3, h4 := d.Sum256(data)
 		//
 		a1 := []byte{1} // to grab another bit of data
 		hasher := murmur3.New128()
@@ -47,8 +47,8 @@ func TestHashRandom(t *testing.T) {
 		data := bigdata[:length]
 		for trial := 1; trial < 10; trial++ {
 			rand.Read(data)
-			var d digest128
-			h1, h2, h3, h4 := d.sum256(data)
+			var d Digest128
+			h1, h2, h3, h4 := d.Sum256(data)
 			//
 			a1 := []byte{1} // to grab another bit of data
 			hasher := murmur3.New128()

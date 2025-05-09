@@ -59,8 +59,8 @@ func FromWithM(data []int64, m, k uint) *BloomFilter {
 // baseHashes returns the four hash values of data that are used to create k
 // hashes
 func baseHashes(data []byte) [4]uint64 {
-	var d digest128 // murmur hashing
-	hash1, hash2, hash3, hash4 := d.sum256(data)
+	var d Digest128 // murmur hashing
+	hash1, hash2, hash3, hash4 := d.Sum256(data)
 	return [4]uint64{
 		hash1, hash2, hash3, hash4,
 	}
@@ -119,6 +119,14 @@ func (f *BloomFilter) Add(data []byte) *BloomFilter {
 	return f
 }
 
+// Add precomputed hash values to the Bloom Filter. Returns the filter (allows chaining)
+func (f *BloomFilter) AddHash(h [4]uint64) *BloomFilter {
+	for i := uint(0); i < f.k; i++ {
+		f.b.Set(f.location(h, i))
+	}
+	return f
+}
+
 // Merge the data from another Bloom Filter. Returns error if parameters don't match.
 func (f *BloomFilter) Merge(g *BloomFilter) error {
 	if f.m != g.m {
@@ -150,6 +158,16 @@ func (f *BloomFilter) AddString(data string) *BloomFilter {
 // Test returns true if the data is *probably* in the BloomFilter, false otherwise.
 func (f *BloomFilter) Test(data []byte) bool {
 	h := baseHashes(data)
+	for i := uint(0); i < f.k; i++ {
+		if !f.b.Test(f.location(h, i)) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestHash returns true if the hash is *probably* in the BloomFilter.
+func (f *BloomFilter) TestHash(h [4]uint64) bool {
 	for i := uint(0); i < f.k; i++ {
 		if !f.b.Test(f.location(h, i)) {
 			return false
